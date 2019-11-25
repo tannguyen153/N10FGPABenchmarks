@@ -1,0 +1,9 @@
+#!/bin/bash
+#PBS -l walltime=48:00:00
+#PBS -l nodes=1:ppn=4
+
+. /opt/source-intelpac.sh
+
+cd /home/nnguyent/nersc_fpga/microBench/dotP
+aoc -c dotP_kernel_swiManyPEs.cl -no-interleaving=DDR -o dotP_kernel_swi4PE_BS2048_UF128.aoco
+aoc dotP_kernel_swi4PE_BS2048_UF128.aoco -o dotP_kernel_swi4PEs_BS2048_UF128.aocx 
