@@ -1,0 +1,9 @@
+#!/bin/bash
+#PBS -l walltime=48:00:00
+#PBS -l nodes=1:ppn=4
+
+. /opt/source-intelpac.sh
+
+cd /home/nnguyent/nersc_fpga/N10FGPABenchmarks/spmv
+aoc -c spmv_kernel_swi_opt.cl -no-interleaving=DDR -fp-relaxed -o spmv_kernel_swi2WkrsRB1_UF16.aoco
+aoc spmv_kernel_swi2WkrsRB1_UF16.aoco -no-interleaving=DDR -fp-relaxed -o spmv_kernel_fpga_optimized_swi2WkrsRB1_UF16.aocx 
