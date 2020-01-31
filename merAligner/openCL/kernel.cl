@@ -1,5 +1,5 @@
 #define BLOCK_SIZE 128
-#define SHAREMEM 4096
+#define SHAREMEM 2048
 #pragma OPENCL EXTENSION cl_khr_initialize_memory : enable
 
 #define EXTEND_GAP -2
@@ -71,7 +71,7 @@ void align_sequences_gpu(__global char* seqA_array, __global char* seqB_array, _
     __global int* I_j;
 
     __local unsigned int is_valid_array[SHAREMEM];//table
-    __local char myLocString[SHAREMEM];//read in
+    __local unsigned int myLocString[SHAREMEM];//read in
     __local unsigned int diagOffset[SHAREMEM];//diag offset
 
     if(myId == 0)
