@@ -43,6 +43,7 @@ inline  short blockReduce(short myVal, short* myIndex, short* myIndex2, unsigned
 	    	cacheIdx2[myTId]= cacheIdx2[myTId+step];
             }
 	step= step/2;
+        barrier(CLK_LOCAL_MEM_FENCE);
     }
     *myIndex= cacheIdx[0];
     *myIndex2= cacheIdx2[0];
