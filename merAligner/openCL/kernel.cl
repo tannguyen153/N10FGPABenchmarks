@@ -192,14 +192,14 @@ void align_sequences_gpu(__global char* seqA_array, __global char* seqB_array, _
         prev_E_idx      = curr_E_idx;
         curr_E_idx      = prev_prev_E_idx;
         prev_prev_E_idx = tmp;
-        for(int ii=0; ii<lengthSeqB + 1; ii+=BLOCK_SIZE) is_valid_array[curr_E_idx+ii]=0;
+        for(int ii=myTId; ii<lengthSeqB + 1; ii+= BLOCK_SIZE) is_valid_array[curr_E_idx+ii]=0;
         barrier(CLK_LOCAL_MEM_FENCE);
 
         tmp     = prev_F_idx;
         prev_F_idx      = curr_F_idx;
         curr_F_idx      = prev_prev_F_idx;
         prev_prev_F_idx = tmp;
-        for(int ii=0; ii<lengthSeqB + 1; ii+= BLOCK_SIZE) is_valid_array[curr_F_idx+ii]=0;
+        for(int ii=myTId; ii<lengthSeqB + 1; ii+= BLOCK_SIZE) is_valid_array[curr_F_idx+ii]=0;
         barrier(CLK_LOCAL_MEM_FENCE);
 
         if(is_valid_array[myTId + is_valid_idx] && myTId < lengthSeqB)
