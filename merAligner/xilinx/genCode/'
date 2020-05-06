@@ -1,0 +1,187 @@
+L=2
+W=8
+loaders=str(L)+"Loaders"
+workers=str(W)+"Workers"
+filename= "aligner"+loaders+workers
+filename= filename+ ".cl"
+f = open(filename,'w')
+f.write("#define PAIR_BLOCKS 1000000\n")
+f.write("#define B_BLOCK_WIDTH 128\n")
+f.write("#define A_BLOCK_WIDTH 1024\n")
+f.write("#define EXTEND_GAP -2\n")
+f.write("#define START_GAP -2\n")
+f.write("#define MATCH 15\n")
+f.write("#define MISMATCH -3\n")
+WORKER= "#define WORKERS "
+WORKER+=str(W)
+WORKER+="\n"
+f.write(WORKER)
+f.write("#pragma OPENCL EXTENSION cl_intel_channels : enable\n")
+
+#generate channels that connect data loader with SW kernels
+for i in range(0,W):
+  channel="channel char           __attribute__((depth(1))) CHANNELA_W"+str(i)+";\n"
+  f.write(channel)
+  channel="channel char           __attribute__((depth(1))) CHANNELB_W"+str(i)+";\n"
+  f.write(channel)
+  channel="channel unsigned short __attribute__((depth(1))) CHANNEL_ROWIDX_W"+str(i)+";\n"
+  f.write(channel)
+  channel="channel unsigned short __attribute__((depth(1))) CHANNEL_COLIDX_W"+str(i)+";\n"
+  f.write(channel)
+  channel="channel char           __attribute__((depth(1))) CHANNELA_REV_W"+str(i)+";\n"
+  f.write(channel)
+  channel="channel char           __attribute__((depth(1))) CHANNELB_REV_W"+str(i)+";\n"
+  f.write(channel)
+  channel="channel unsigned short __attribute__((depth(1))) CHANNEL_ROWIDX_REV_W"+str(i)+";\n"
+  f.write(channel)
+  channel="channel unsigned short __attribute__((depth(1))) CHANNEL_COLIDX_REV_W"+str(i)+";\n"
+  f.write(channel)
+
+for i in range(0,L):
+  loadFunc= "__attribute__((reqd_work_group_size(1,1,1)))\n"
+  loadFunc+= "__kernel void loadAB"
+  loadFunc+= str(i)
+  loadFunc+= "(__global char * restrict a, __global char * restrict b, \n"
+  loadFunc+= "        __global const unsigned * restrict prefix_lengthA,\n"
+  loadFunc+= "        __global const unsigned * restrict prefix_lengthB)\n{\n"
+  loadFunc+= "    __local char private_b[B_BLOCK_WIDTH];\n"
+  loadFunc+= "    __local char a_cache[WORKERS][8+8];//8 bytes for forward and 8 bytes for reverse directions\n"
+  loadFunc+= "    #pragma unroll 1\n"
+  loadFunc+= "    for(unsigned pair=0;pair<PAIR_BLOCKS; pair+=WORKERS)\n    {\n"
+  loadFunc+= "        #pragma unroll 1\n"
+  loadFunc+= "        for(unsigned short w="
+  loadFunc+=          str(i)
+  loadFunc+=          "; w<WORKERS; w+="
+  loadFunc+=          str(L)
+  loadFunc+=          ")\n        {\n"
+  loadFunc+= "            __global char * volatile ptr_b; //declare with volatile so that the compiler will not waste area for caching loaded data \n"
+  loadFunc+= "            unsigned seqB_idx;\n"
+  loadIdx0=  "            if(pair==0 && w==0) seqB_idx= 0;\n            else seqB_idx= prefix_lengthB[pair + w - 1];\n"
+  loadIdx1=  "            seqB_idx     = prefix_lengthB[pair + w - 1];\n"
+  if i==0: loadFunc+= loadIdx0
+  else: loadFunc+= loadIdx1
+  loadFunc+= "            ptr_b = &b[seqB_idx];\n"
+  loadFunc+= "            #pragma unroll 1\n"
+  loadFunc+= "            #pragma ivdep\n"
+  loadFunc+= "            for (unsigned short j=0; j < B_BLOCK_WIDTH ; j++)\n            {\n"
+  loadFunc+= "                private_b[j] = ptr_b[j];\n            }\n"
+  loadFunc+= "            switch(w){\n"
+  for w in range(i,W,L):
+    loadFunc+= "              case "
+    loadFunc+= str(w)
+    loadFunc+= ":\n"
+    loadFunc+= "                  for(unsigned short offset=0; offset<B_BLOCK_WIDTH; offset++)\n                    {\n"
+    loadFunc+= "                      write_channel_intel(CHANNELB_W"
+    loadFunc+= str(w)
+    loadFunc+=", private_b[offset]);\n"
+    loadFunc+= "                      write_channel_intel(CHANNELB_REV_W"
+    loadFunc+= str(w)
+    loadFunc+= ", private_b[offset]);\n                    }\n"
+    loadFunc+= "                  break;\n"
+
+  loadFunc+= "            }//end switch\n"
+  loadFunc+= "        }//end for workers\n"
+
+  loadFunc+= "        __global char* volatile ptr_a[WORKERS];\n"
+  loadFunc+= "        #pragma unroll 1\n"
+  loadFunc+= "        for(unsigned short w="
+  loadFunc+=          str(i)
+  loadFunc+=          "; w<WORKERS; w+="
+  loadFunc+=          str(L)
+  loadFunc+=          ")\n        {\n"
+  loadFunc+= "            unsigned seqA_idx;\n"
+  loadAIdx0= "            if(pair==0 && w==0) seqA_idx= 0;\n            else seqA_idx= prefix_lengthA[pair + w - 1];\n"
+  loadAIdx1= "            seqA_idx     = prefix_lengthA[pair + w - 1];\n"
+  if i==0: loadFunc+= loadAIdx0
+  else: loadFunc+= loadAIdx1
+  loadFunc+= "            ptr_a[w]= &a[seqA_idx];\n        }//end worker\n"
+
+  loadFunc+= "        unsigned short i_fwd=0, i_rev=A_BLOCK_WIDTH-1-8;\n"
+  loadFunc+= "        #pragma unroll 1\n"
+  loadFunc+= "        for(unsigned short i = 0; i< A_BLOCK_WIDTH; i++)\n        {\n"
+  loadFunc+= "            unsigned short imod8= i%8;\n"
+  loadFunc+= "            #pragma unroll 1\n"
+  loadFunc+= "            for(unsigned short w="
+  loadFunc+=              str(i)
+  loadFunc+=              "; w<WORKERS; w+="
+  loadFunc+=              str(L)
+  loadFunc+=              ")\n            {\n"
+  loadFunc+= "                if(imod8==0){\n"
+  loadFunc+= "                    #pragma unroll 1\n"
+  loadFunc+= "                    #pragma ivdep\n"
+  loadFunc+= "                    for(unsigned short i0 = 0; i0< 8; i0++){\n"
+  loadFunc+= "                        a_cache[w][i0]= ptr_a[w][i_fwd+i0];\n"
+  loadFunc+= "                        a_cache[w][8+i0]= ptr_a[w][i_rev+i0];\n"
+  loadFunc+= "                    }\n                }\n"
+  loadFunc+= "                char ai     = a_cache[w][imod8];\n"
+  loadFunc+= "                char ai_rev     = a_cache[w][15-imod8];\n"
+  loadFunc+= "                switch(w){\n"
+  for w in range(i,W,L):
+    loadFunc+= "                    case "
+    loadFunc+= str(w)
+    loadFunc+= ":\n"
+    loadFunc+= "                        write_channel_intel(CHANNELA_W"
+    loadFunc+= str(w)
+    loadFunc+= ", ai);\n"
+    loadFunc+= "                        write_channel_intel(CHANNELA_REV_W"
+    loadFunc+= str(w)
+    loadFunc+= ", ai_rev);\n"
+    loadFunc+= "                    break;\n"
+  loadFunc+= "                }//end switch\n"		
+  loadFunc+= "            }//end worker\n"		
+  loadFunc+= "            if(imod8==7){\n"
+  loadFunc+= "                i_fwd = i_fwd +8;\n"
+  loadFunc+= "                i_rev= i_rev-8\n;"
+  loadFunc+= "            }\n"
+  loadFunc+= "        }//end A rows\n"		
+  loadFunc+= "    }//end pair\n"
+  loadFunc+= "}//end loadAB function\n"
+  f.write(loadFunc);
+
+
+
+storeResultsFunc=  "__attribute__((reqd_work_group_size(1,1,1)))\n"
+storeResultsFunc+= "__kernel void storeResults (\n"
+storeResultsFunc+= "__global unsigned short* restrict seqA_align_beg, __global unsigned short* restrict seqA_align_end,\n"
+storeResultsFunc+= "__global unsigned short* restrict seqB_align_beg, __global unsigned short* restrict seqB_align_end)\n{\n"
+storeResultsFunc+= "    #pragma unroll 1\n"
+storeResultsFunc+= "    for(unsigned pair=0;pair<PAIR_BLOCKS; pair+=WORKERS)\n{    \n"
+storeResultsFunc+= "        unsigned short row_idx[WORKERS], finalColIdx[WORKERS], row_idx_rev[WORKERS], finalColIdx_rev[WORKERS];\n"
+storeResultsFunc+= "        for(unsigned short w=0; w<WORKERS; w++)\n        {\n"
+storeResultsFunc+= "            switch(w){\n"
+for w in range(i,W,L):
+  storeResultsFunc+= "                case"
+  storeResultsFunc+= str(w)
+  storeResultsFunc+=  ":\n"
+  storeResultsFunc+= "row_idx[w]= read_channel_intel(CHANNEL_ROWIDX_W"
+  storeResultsFunc+= str(w)
+  storeResultsFunc+= ");"
+  storeResultsFunc+= "finalColIdx[w]= read_channel_intel(CHANNEL_COLIDX_W"
+  storeResultsFunc+= str(w)
+  storeResultsFunc+= ");"
+  storeResultsFunc+= "row_idx_rev[w]= read_channel_intel(CHANNEL_ROWIDX_REV_W"
+  storeResultsFunc+= str(w)
+  storeResultsFunc+= ");"
+  oreResult+= "finalColIdx_rev[w]= read_channel_intel(CHANNEL_COLIDX_REV_W"
+  storeResultsFunc+= str(w)
+  storeResultsFunc+= ");"
+  storeResultsFunc+= "            break;"
+  storeResultsFunc+= "            };//end switch\n"
+  storeResultsFunc+= "        }//end worker\n"		
+  storeResultsFunc+= "        #pragma unroll 1\n"
+  storeResultsFunc+= "        for(unsigned short w=0; w<WORKERS; w++)\n{        \n"
+  storeResultsFunc+= "            seqA_align_end[pair+w]= row_idx[w]+1;\n"
+  storeResultsFunc+= "            seqB_align_end[pair+w]= finalColIdx[w]+1;\n"
+  storeResultsFunc+= "            
+                seqB_align_end[pair+w]= finalColIdx[w]+1; 
+                seqA_align_beg[pair+w]= row_idx_rev[w]-1;
+                seqB_align_beg[pair+w]= finalColIdx_rev[w]; 
+        }
+
+  storeResultsFunc+= "    }//end pair\n"
+  storeResultsFunc+= "}//end storeResults function\n"
+f.write(storeResultsFunc);
+
+
+
+f.close()
