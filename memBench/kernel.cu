@@ -62,8 +62,7 @@ __global__ void kernel(TYPE *mat, TYPE *val, unsigned long num_thread_blocks,uns
    	        data[wid][i0]= mat[i+i0];
 	    for(int r=0; r<ntimes; r++){
 		for (unsigned long i0 = lane; i0 < ONCHIP_BUFFERSIZE; i0+=WARP_SIZE){
-	            tmp_val = data[wid][i0]+1.0; 
-		    data[wid][i0]= tmp_val;
+	            data[wid][i0]+=1.0; 
 		}
 	    }
 	    //store the data back to HBM
@@ -100,10 +99,12 @@ __global__ void kernel(TYPE *mat, TYPE *val, unsigned long num_thread_blocks,uns
 }
 
 
-#define VEC_LENGTH 4
+//we don't want to set VEC_LENGTH to 1, as it will trigger the optimizer that caches data in register instead of shared memory in some certain cases
+#define VEC_LENGTH 2
 #define VECS_PER_WARP WARP_SIZE/VEC_LENGTH
 #define NVECS NWARPS*VECS_PER_WARP
-#define LOW_ONCHIP_BUFFERSIZE 32
+//The padding alignment is to avoid bank conflict
+#define LOW_ONCHIP_BUFFERSIZE 32+VEC_LENGTH
 __global__ void kernel_lowLocality(TYPE *mat, TYPE *val, unsigned long num_thread_blocks,unsigned long num_segments, unsigned long num_elements, int ntimes)
 {
     static __shared__ TYPE psum[32];
@@ -135,17 +136,19 @@ __global__ void kernel_lowLocality(TYPE *mat, TYPE *val, unsigned long num_threa
             //load part of the segment from HBM to scratchpad
             for (unsigned long i0 = lane; i0 < LOW_ONCHIP_BUFFERSIZE && i+i0<stop; i0+=VEC_LENGTH)
                 data[wid][i0]= mat[i+i0];
-            for(int r=0; r<ntimes; r++){
-                for (unsigned long i0 = lane; i0 < LOW_ONCHIP_BUFFERSIZE; i0+=VEC_LENGTH){
-                    tmp_val = data[wid][i0]+1.0;
-                    data[wid][i0]= tmp_val;
-                }
-            }
+	    if(num_elements<LOW_ONCHIP_BUFFERSIZE){
+                for(int r=0; r<ntimes; r++)
+                    for (unsigned long i0 = lane; i0 < num_elements; i0+=VEC_LENGTH)
+                        data[wid][i0]+=1.0;
+	    }else{
+                for(int r=0; r<ntimes; r++)
+                    for (unsigned long i0 = lane; i0 < LOW_ONCHIP_BUFFERSIZE; i0+=VEC_LENGTH)
+                        data[wid][i0]+=1.0;
+	    }
             //store the data back to HBM
             for (unsigned long i0 = lane; i0 < LOW_ONCHIP_BUFFERSIZE && i+i0<stop; i0+=VEC_LENGTH)
 	    {
                 mat[i+i0]= data[wid][i0];
-		//if(wid==0 && lane==0)printf("Final value at %ul is %f\n", i+i0, data[wid][i0]);
 	    }
         }
 	#else
@@ -211,8 +214,7 @@ __global__ void kernel_extremeLocality(TYPE *mat, TYPE *val, unsigned long num_t
                 data[wid][i0]= mat[i+i0];
             for(int r=0; r<ntimes; r++){
                 for (unsigned long i0 = lane; i0 < HIGH_ONCHIP_BUFFERSIZE; i0+=LARGE_VEC_LENGTH){
-                    tmp_val = data[wid][i0]+1.0;
-                    data[wid][i0]= tmp_val;
+                    data[wid][i0]+=1.0;
                 }
             }
             //store the data back to HBM
@@ -220,7 +222,7 @@ __global__ void kernel_extremeLocality(TYPE *mat, TYPE *val, unsigned long num_t
 		mat[i+i0]= data[wid][i0];
         }
         #else
-         for(int r=0; r<ntimes; r++)
+        for(int r=0; r<ntimes; r++)
            for (unsigned long i = start+ lane; i < stop; i+=LARGE_VEC_LENGTH) {
 	    #if ENABLE_READ==1
                tmp_val += mat[i];
@@ -247,7 +249,7 @@ __global__ void kernel_extremeLocality(TYPE *mat, TYPE *val, unsigned long num_t
 
 void cudaKernel(TYPE *d_mat, TYPE *d_val, unsigned long num_thread_blocks, unsigned long num_segments, unsigned long num_elements, int ntimes)
 {
-    if(num_elements<128){
+    if(num_elements<=256){
 	std::cout<<"Low Locality: Breaking each warp to subwarps"<< std::endl;
 	kernel_lowLocality<<< num_thread_blocks, THREADS_PER_BLOCK >>>(d_mat, d_val, num_thread_blocks, num_segments, num_elements, ntimes);
     }
