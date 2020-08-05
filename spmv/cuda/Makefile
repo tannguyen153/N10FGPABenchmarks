@@ -9,6 +9,5 @@ LIBS = $(CUDA_LIBS)
 
 all:
 	$(CC)  -arch=sm_70 -O3 -Xcompiler -fopenmp main.cu -o spmv $(INCLUDES) $(LIBS) -DUSE_DOUBLE=$(USE_DOUBLE) -w
-	#CC  -openmp main.C -o spmv_cpu -DUSE_DOUBLE=$(USE_DOUBLE) -w
 clean:
 	rm spmv
