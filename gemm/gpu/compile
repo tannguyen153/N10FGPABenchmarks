@@ -1,0 +1,2 @@
+#compile the code on Cori GPU
+nvcc -Xcompiler -fopenmp  -arch=sm_70 --ptxas-options=-v  main.cu -o main -I/usr/common/software/cuda/10.1.168/include/ -L/usr/common/software/cuda/10.1.168/lib64/ -I./host/inc/ -O3 -lcuda -lm -lnvidia-ml
