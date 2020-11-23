@@ -1,0 +1,14 @@
+#compile
+CC -O3 summa.c -DMKL=1 -o summa
+
+#example command to run on 16 cores
+srun -n 16 -N 1 ./summa -M 8192 -N 8192 -K 8192 -px 4 -py 4 -l 256
+
+# MxK and KxN matrices
+# -px is processor col
+# -py is processor row
+# -l is pannel size (block size)
+
+#additional options
+#-v to enable verification (please use small matrices)
+#-nc to shut off communication
