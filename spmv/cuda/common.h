@@ -27,7 +27,7 @@ typedef double   value_type;
 typedef float   value_type;
 #endif
 
-#define NUM_RUN      1
+#define NUM_RUN      10
 
 struct mytimer {
     timeval t1, t2;

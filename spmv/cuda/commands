@@ -1,0 +1,8 @@
+#compile
+make
+
+#set num OMP threads for the CPU code
+export OMP_NUM_THREADS=40
+
+#run example
+srun -n 1 ./spmv ../test_mats/c8_mat11.mtx 
