@@ -12,7 +12,11 @@ volatile int flag;
 #endif
 #include <unistd.h>
 #define BLOCK_SIZE 128
-#define REPEATS 100
+#ifdef REPS
+#define REPEATS REPS
+#else 
+#define REPEATS 10
+#endif
 
 #ifdef USE_NVML
 static inline double GetPowerGPU(int DeviceID)
@@ -65,11 +69,6 @@ static inline double GetPowerGPU(int DeviceID)
 
     return (double)(powerSum)/(double)(count * 1000.0); // Wattage is in mWatt, hence the division by 1000
 }
-
-static inline double GetEnergyGPU(double power, double time)
-{
-    return (power * time / 1000.0); // Time is in ms, hence the division by 1000.
-}
 #endif
 
 #include <sys/time.h>
@@ -113,7 +112,6 @@ __global__ void  matrixMult( float  *C, float  *A, float *B, int A_width, int B_
     // Local ID index (offset within a block)
     int local_x = threadIdx.x;
     int local_y = threadIdx.y;
-    int local_z = threadIdx.z;
     float  acc[WPT_Y][WPT_X];
     //float  Breg[WPT_X];
     for (int wm=0; wm<WPT_Y; wm++) {
@@ -163,10 +161,8 @@ __global__ void  matrixMult( float  *C, float  *A, float *B, int A_width, int B_
 
     // Store result in matrix C
     int blockOffset= block_y *BLOCK_SIZE* A_width + block_x*BLOCK_SIZE;
-    //#pragma unroll
     for (int wm=0; wm<WPT_Y; wm++) {
 	int baseOffset= blockOffset+ (local_y+wm*RTS_Y)*A_width + local_x;
-	//#pragma unroll
 	for (int wn=0; wn<WPT_X; wn++) 
 	{
 	    C[baseOffset +  wn*RTS_X] = acc[wm][wn];
@@ -175,11 +171,9 @@ __global__ void  matrixMult( float  *C, float  *A, float *B, int A_width, int B_
 }
 
 
-
 float* input_a_buf;
 float* input_b_buf;
 float* output_buf;
-
 
 // Problem data.
 int A_height = 32 * BLOCK_SIZE;
@@ -254,23 +248,12 @@ float rand_float() {
     return float(rand()) / float(RAND_MAX) * 20.0f - 10.0f;
 }
 
-// Initializes the OpenCL objects.
+// Initializes device objects.
 bool init_cuda() {
     printf("Initializing CUDA\n");
-
     cudaMalloc(&input_a_buf, A_height * A_width * sizeof(float));
-
-    // For matrix B, each device needs the whole matrix. We specifically
-    // assign this buffer to the second bank of global memory.
     cudaMalloc(&input_b_buf, B_height * B_width * sizeof(float));
-
-    // Output buffer. This is matrix C, for the rows that are computed by this
-    // device. We assign this buffer to the first bank of global memory,
-    // although it is not material to performance to do so because
-    // the reads from the input matrices are far more frequent than the
-    // write to the output matrix.
     cudaMalloc(&output_buf, C_height * C_width * sizeof(float));
-
     return true;
 }
 
@@ -283,7 +266,6 @@ void init_problem() {
     for(int j = 0; j < A_height * A_width; ++j) {
 	input_a[j] = rand_float();
     }
-
     for(int i = 0; i < B_height * B_width; ++i) {
 	input_b[i] = rand_float();
     }
@@ -298,11 +280,11 @@ void run(bool warmup, int repeats) {
     dim3 blockDim(RTS_X, RTS_Y, 1);
     dim3 gridDim((C_width/BLOCK_SIZE), (C_height/BLOCK_SIZE), 1);
     if(!warmup) printf("Dim block %d %d %d and grid %d %d", blockDim.x, blockDim.y, blockDim.z, gridDim.x, gridDim.y);
-    double power, energy;
     flag=0;
     const double start_time = getTime();
 
 #if USE_NVML  
+    double power;
 #pragma omp parallel num_threads(2) shared(flag)        
     {       
 	if (omp_get_thread_num() == 1)
@@ -326,7 +308,6 @@ for(int r=0; r<REPEATS; r++)
     const double total_time = (end_time - start_time)/REPEATS;
 if(!warmup)
 {
-    energy = GetEnergyGPU(power, total_time);
     printf("Average power consumption is %0.3lf watts\n", power);
 }
 #else
@@ -355,8 +336,10 @@ if(!warmup)
     cudaMemcpy(output, output_buf, C_height * C_width * sizeof(float), cudaMemcpyDeviceToHost);
 
     // Verify results.
-    //compute_reference();
-    //verify();
+#ifdef VERIFY
+    compute_reference();
+    verify();
+#endif
 }
 
 void compute_reference() {
@@ -379,11 +362,6 @@ void compute_reference() {
 void verify() {
     printf("Verifying\n");
     bool pass = true;
-
-    // Compute the L^2-Norm of the difference between the output and reference
-    // output matrices and compare it against the L^2-Norm of the reference.
-    float diff = 0.0f;
-    float ref = 0.0f;
     for(int y = 0; y < C_height; ++y) {
 	for(int x = 0; x < C_width; ++x) {
 	    const float o = output[y * C_width + x];
@@ -413,4 +391,3 @@ void cleanup() {
     free(output);
     free(input_b);
 }
-

@@ -1,0 +1,17 @@
+#compile the code on Cori-GPU, including V100 and A100 nodes
+/usr/common/software/cuda/10.1.168/bin/nvcc -Xcompiler -fopenmp  -arch=sm_70 --ptxas-options=-v  main.cu -o main -I/usr/common/software/cuda/10.1.168/include/ -L/usr/common/software/cuda/10.1.168/lib64/ -I./host/inc/ -O3 -lcuda -lm -lnvidia-ml
+
+#example run command
+srun -n 1 ./main 8192 8192 8192
+
+#Additional compilation options
+
+#number of trials, e.g. 100 trials + 1 warm up (default is 10 + 1)
+-DREPS=100
+
+#report average power consumption
+-DUSE_NVML=1
+
+#enable verification code
+#note: due to the serial code for verification purpose, input matrices should be small, e.g. 256x256
+-DVERIFY=1
